@@ -1,11 +1,6 @@
-# Vyacheslav's Home Assistant Add-ons
+# Binance Spot Signals (WebSocket) — HA Add-on
 
-This repository hosts custom add-ons for Home Assistant.
-
-## Included
-- `binance_spot_signals_ws` — Binance Spot WebSocket Signals Bot (1h/15m/5m) with Telegram alerts.
-
-## How to add this repo in Home Assistant
-1. Settings → Add-ons → Add-on Store → menu (⋮) → **Repositories**.
-2. Add: `https://github.com/your-username/ha-addons-repo`
-3. The add-on will appear under **Repositories** or **Local add-ons**.
+Версия 1.5.0: 
+- Порог подтверждений теперь **строго N-из-5** (1..5): любые N условий из пяти дают сигнал.
+- Убран `min_alert_level` (строковый). Используй только `min_alert_level_n`.
+- Пять условий: Trend, Location(VWAP/σ), Momentum(MACD+RSI zones), Trigger candle+Volume, Structure(retest/breakout).
