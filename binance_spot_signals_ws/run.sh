@@ -22,6 +22,7 @@ log_level: "INFO"
 EOF
 fi
 
+# Load .env if present
 if [ -f /data/.env ]; then
   set -a
   . /data/.env

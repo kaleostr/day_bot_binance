@@ -1,6 +1,6 @@
 {
   "name": "Binance Spot Signals (WebSocket)",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "slug": "binance_spot_signals_ws",
   "description": "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts.",
   "arch": [
