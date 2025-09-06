@@ -1,5 +1,5 @@
 name: "Binance Spot Signals (WebSocket)"
-version: "1.3.0"
+version: "1.3.1"
 slug: "binance_spot_signals_ws"
 description: "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts. Raspberry Pi 5 ready."
 arch:
@@ -24,10 +24,8 @@ options:
   rest_base: "https://api.binance.com"
   history_bars: 300
   log_level: "INFO"
-  # Telegram (now configurable in UI)
   tg_token: ""
   tg_chat_id: ""
-  # Indicator settings (UI-tunable)
   ema_fast_1h: 20
   ema_slow_1h: 50
   ema_200_15m: 200
