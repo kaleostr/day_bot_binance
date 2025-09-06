@@ -3,14 +3,25 @@ import numpy as np
 def ema(arr: np.ndarray, period: int) -> np.ndarray:
     arr = np.asarray(arr, dtype=float)
     out = np.full_like(arr, np.nan, dtype=float)
-    if arr.size == 0:
+    n = arr.size
+    if n == 0 or period <= 0:
         return out
-    alpha = 2/(period+1)
-    s = np.nanmean(arr[:period])
-    if period-1 < out.size:
-        out[period-1] = s
-    for i in range(period, arr.size):
-        s = alpha*arr[i] + (1-alpha)*s
+
+    # Seed EMA from the first finite value to avoid NaN means / warnings
+    finite_mask = np.isfinite(arr)
+    if not finite_mask.any():
+        return out
+
+    first = int(np.argmax(finite_mask))
+    s = float(arr[first])
+    out[first] = s
+    alpha = 2.0 / (period + 1.0)
+
+    for i in range(first + 1, n):
+        x = arr[i]
+        if not np.isfinite(x):
+            x = s  # carry forward last EMA to skip NaNs
+        s = alpha * x + (1.0 - alpha) * s
         out[i] = s
     return out
 
@@ -19,6 +30,7 @@ def rsi(close: np.ndarray, period: int=14) -> np.ndarray:
     diff = np.diff(close, prepend=close[0])
     gain = np.where(diff>0, diff, 0.0)
     loss = np.where(diff<0, -diff, 0.0)
+    # Wilder's smoothing
     g = np.nanmean(gain[1:period+1]); l = np.nanmean(loss[1:period+1])
     avg_g = np.full_like(close, np.nan, dtype=float)
     avg_l = np.full_like(close, np.nan, dtype=float)

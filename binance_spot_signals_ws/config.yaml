@@ -1,5 +1,5 @@
 name: "Binance Spot Signals (WebSocket)"
-version: "1.2.0"
+version: "1.2.1"
 slug: "binance_spot_signals_ws"
 description: "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts. Raspberry Pi 5 ready."
 arch:
@@ -20,7 +20,7 @@ options:
   cooldown_minutes_per_symbol: 10
   send_startup_message: true
   min_alert_level: "conservative"
-  ws_url: "wss://stream.binance.com:9443"   # base; code adds /stream?streams=...
+  ws_url: "wss://stream.binance.com:9443"
   rest_base: "https://api.binance.com"
   history_bars: 300
   log_level: "INFO"
