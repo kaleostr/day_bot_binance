@@ -1,20 +1,19 @@
 ARG BUILD_FROM
 FROM $BUILD_FROM
 
-# Keep Python slim & install deps
-RUN apk add --no-cache python3 py3-pip tzdata
+RUN apk add --no-cache     python3 py3-pip tzdata     py3-numpy py3-yaml
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Create venv that can see system packages (PEP 668 safe)
+RUN python3 -m venv /opt/venv --system-site-packages
+ENV PATH="/opt/venv/bin:${PATH}"     PIP_NO_CACHE_DIR=1     PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1
 
-# App files
 WORKDIR /opt/app
+
 COPY requirements.txt /opt/requirements.txt
-RUN python3 -m pip install --no-cache-dir -r /opt/requirements.txt
+RUN pip install --upgrade pip && pip install -r /opt/requirements.txt
 
 COPY src /opt/app/src
 COPY run.sh /run.sh
-RUN chmod a+x /run.sh && sed -i 's/\r$//' /run.sh
+RUN sed -i 's/\r$//' /run.sh && chmod +x /run.sh
 
-# S6 overlay entrypoint (per HA docs)
 CMD ["/run.sh"]

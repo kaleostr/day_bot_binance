@@ -1,19 +1,10 @@
-import asyncio, json, math, time, logging
-from typing import Dict, List, Optional, Tuple
-from zoneinfo import ZoneInfo
-from datetime import datetime, timezone, timedelta
-
-import httpx
-import websockets
-import yaml
-import numpy as np
+import asyncio, logging, yaml
 from pydantic import BaseModel
-
+from zoneinfo import ZoneInfo
+from typing import List
 from src.core.exchange import BinanceREST, BinanceWS
 from src.logic.engine import SignalEngine
 from src.telegram.notify import Telegram
-
-logger = logging.getLogger("app")
 
 class Config(BaseModel):
     symbols: List[str]
@@ -33,30 +24,32 @@ async def main(config_path: str):
 
     logging.basicConfig(level=getattr(logging, cfg.log_level.upper(), logging.INFO),
                         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    log = logging.getLogger("app")
 
     tz = ZoneInfo(cfg.timezone)
     rest = BinanceREST(cfg.rest_base)
     tick_size = await rest.get_tick_size_map(cfg.symbols)
 
     tg = Telegram.from_env()
-    engine = SignalEngine(tz=tz,
-                          vwap_reset_local=cfg.vwap_session_reset,
-                          cooldown_minutes=cfg.cooldown_minutes_per_symbol,
-                          min_level=cfg.min_alert_level,
-                          tick_size=tick_size,
-                          telegram=tg)
+    engine = SignalEngine(
+        tz=tz, vwap_reset_local=cfg.vwap_session_reset,
+        cooldown_minutes=cfg.cooldown_minutes_per_symbol,
+        min_level=cfg.min_alert_level, tick_size=tick_size, telegram=tg
+    )
 
-    # preload history
-    for sym in cfg.symbols:
-        h1 = await rest.get_klines(sym, "1h", cfg.history_bars)
-        m15 = await rest.get_klines(sym, "15m", cfg.history_bars)
-        m5 = await rest.get_klines(sym, "5m", cfg.history_bars)
-        engine.warmup(sym, h1, m15, m5)
+    # preload
+    for s in cfg.symbols:
+        h1 = await rest.get_klines(s, "1h", cfg.history_bars)
+        m15 = await rest.get_klines(s, "15m", cfg.history_bars)
+        m5 = await rest.get_klines(s, "5m", cfg.history_bars)
+        engine.warmup(s, h1, m15, m5)
 
     if cfg.send_startup_message and tg.available:
-        await tg.send(f"✅ Bot started. TZ={cfg.timezone}, symbols={cfg.symbols}")
+        await tg.send(f"✅ Bot started (TZ={cfg.timezone}). Symbols={cfg.symbols}")
 
-    # start WS
+    if tg.available:
+        asyncio.create_task(tg.poll_commands(lambda: engine.status_snapshot(cfg.symbols, cfg.timezone)))
+
     ws = BinanceWS(cfg.ws_url, cfg.symbols)
     async for event in ws.stream():
         if event["type"] == "kline_close":
@@ -64,15 +57,13 @@ async def main(config_path: str):
             interval = event["interval"]
             k = event["kline"]
             engine.on_close(sym, interval, k)
-
             if interval == "5m":
                 msg = engine.evaluate(sym)
                 if msg:
                     await tg.send(msg)
 
-
 if __name__ == "__main__":
-    import argparse, asyncio
+    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     args = parser.parse_args()

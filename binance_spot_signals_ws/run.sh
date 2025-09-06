@@ -1,7 +1,6 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
 
-# Read add-on options from /data/options.json using bashio
 SYMBOLS=$(bashio::config 'symbols' || true)
 TIMEZONE=$(bashio::config 'timezone' || echo "Asia/Seoul")
 VWAP_RESET=$(bashio::config 'vwap_session_reset' || echo "00:00")
@@ -13,7 +12,6 @@ REST_BASE=$(bashio::config 'rest_base' || echo "https://api.binance.com")
 HISTORY_BARS=$(bashio::config 'history_bars' || echo 300)
 LOG_LEVEL=$(bashio::config 'log_level' || echo "INFO")
 
-# Persist runtime config for the Python app
 CFG=/data/config.yaml
 cat > "$CFG" <<EOF
 symbols: ${SYMBOLS}
@@ -28,7 +26,7 @@ history_bars: ${HISTORY_BARS}
 log_level: "${LOG_LEVEL}"
 EOF
 
-# Source optional secrets from addon_config (preferred) or /data/.env for legacy
+# Secrets
 if [ -f /addon_configs/binance_spot_signals_ws/.env ]; then
   set -a; . /addon_configs/binance_spot_signals_ws/.env; set +a
 elif [ -f /data/.env ]; then
@@ -36,4 +34,4 @@ elif [ -f /data/.env ]; then
 fi
 
 export PYTHONPATH=/opt/app
-exec python3 -m src.app --config "$CFG"
+exec /opt/venv/bin/python -m src.app --config "$CFG"
