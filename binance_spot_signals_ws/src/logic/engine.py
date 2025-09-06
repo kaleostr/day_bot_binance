@@ -24,7 +24,14 @@ class Series:
         return (np.array(self.t), np.array(self.o), np.array(self.h), np.array(self.l), np.array(self.c), np.array(self.v))
 
 class SignalEngine:
-    def __init__(self, tz: ZoneInfo, vwap_reset_local: str, cooldown_minutes: int, min_level: str, tick_size: Dict[str,float], telegram):
+    def __init__(self, tz: ZoneInfo, vwap_reset_local: str, cooldown_minutes: int, min_level: str,
+                 tick_size: Dict[str,float], telegram,
+                 ema_fast_1h: int=20, ema_slow_1h: int=50, ema_200_15m: int=200,
+                 macd_fast: int=12, macd_slow: int=26, macd_signal: int=9,
+                 rsi_period: int=14,
+                 atr_period: int=14, atr_sl_mult: float=1.2,
+                 vol_sma_period: int=20, vol_spike_mult: float=1.5,
+                 supertrend_enabled: bool=False, supertrend_period: int=10, supertrend_multiplier: float=3.0):
         self.tz = tz
         self.vwap_hour, self.vwap_minute = map(int, vwap_reset_local.split(":"))
         self.cooldown = timedelta(minutes=cooldown_minutes)
@@ -36,6 +43,21 @@ class SignalEngine:
         self.m5: Dict[str,Series] = {}
         self.vwap: Dict[str,VWAPSession] = {}
         self.last_sent: Dict[str, datetime] = {}
+        # indicators
+        self.ema_fast_1h = ema_fast_1h
+        self.ema_slow_1h = ema_slow_1h
+        self.ema_200_15m = ema_200_15m
+        self.macd_fast = macd_fast
+        self.macd_slow = macd_slow
+        self.macd_signal = macd_signal
+        self.rsi_period = rsi_period
+        self.atr_period = atr_period
+        self.atr_sl_mult = atr_sl_mult
+        self.vol_sma_period = vol_sma_period
+        self.vol_spike_mult = vol_spike_mult
+        self.supertrend_enabled = supertrend_enabled
+        self.supertrend_period = supertrend_period
+        self.supertrend_multiplier = supertrend_multiplier
 
     def warmup(self, sym: str, h1: List[dict], m15: List[dict], m5: List[dict]):
         self.h1[sym] = Series(); self.m15[sym] = Series(); self.m5[sym] = Series()
@@ -59,26 +81,23 @@ class SignalEngine:
             self.vwap[sym].update(tp, k["v"])
 
     def _is_same_kst_day(self, ts:int)->bool:
-        from datetime import datetime
         dt = datetime.fromtimestamp(ts, self.tz)
         now = datetime.now(self.tz)
         return dt.date() == now.date()
 
     def _is_session_reset(self, ts:int)->bool:
-        from datetime import datetime
         dt = datetime.fromtimestamp(ts, self.tz)
         return dt.hour==self.vwap_hour and dt.minute==self.vwap_minute
 
     def _round(self, sym:str, price:float)->float:
         step = self.tick.get(sym, 0.0001)
-        import math
         prec = max(0, -int(round(math.log10(step))))
         return round(round(price/step)*step, prec)
 
     def _bias(self, sym: str, last_close: float):
-        ema20_h1 = ema(self.h1[sym].arrays()[4], 20)
-        ema50_h1 = ema(self.h1[sym].arrays()[4], 50)
-        ema200_15 = ema(self.m15[sym].arrays()[4], 200)
+        ema20_h1 = ema(self.h1[sym].arrays()[4], self.ema_fast_1h)
+        ema50_h1 = ema(self.h1[sym].arrays()[4], self.ema_slow_1h)
+        ema200_15 = ema(self.m15[sym].arrays()[4], self.ema_200_15m)
         bull = ema20_h1[-1] > ema50_h1[-1] and last_close > ema200_15[-1]
         bear = ema20_h1[-1] < ema50_h1[-1] and last_close < ema200_15[-1]
         return bull, bear
@@ -92,11 +111,13 @@ class SignalEngine:
             return None
 
         # Momentum & volume
-        _,_,hist = macd(c); rsi14 = rsi(c, 14)
+        _,_,hist = macd(c, self.macd_fast, self.macd_slow, self.macd_signal)
+        rsi14 = rsi(c, self.rsi_period)
         cond3 = (hist[-2] < 0 <= hist[-1]) if bull else (hist[-2] > 0 >= hist[-1])
         cond3 = cond3 and ((rsi14[-1] >= 50) if bull else (rsi14[-1] <= 50))
-        sma20 = np.nanmean(v[-20:]) if len(v)>=20 else np.nanmean(v)
-        cond4 = v[-1] > 1.5 * sma20
+        smaN = self.vol_sma_period if len(v)>=self.vol_sma_period else len(v)
+        sma = np.nanmean(v[-smaN:]) if smaN>0 else np.nanmean(v)
+        cond4 = v[-1] > self.vol_spike_mult * sma
 
         # Location around VWAP (±1σ proxy)
         trig_high, trig_low = h[-1], l[-1]
@@ -122,12 +143,13 @@ class SignalEngine:
         if last and (now - last) < self.cooldown:
             return None
 
-        # Prices
-        direction = "LONG" if bull else "SHORT"
+        # Prices via ATR
         side = 1 if bull else -1
-        atr14 = atr_rma(h,l,c,14)
+        direction = "LONG" if bull else "SHORT"
+        atrN = self.atr_period
+        atr = atr_rma(h,l,c,atrN)
         entry = (trig_high * 1.0001) if bull else (trig_low * 0.9999)
-        sl = (min(l[-5:]) - 1.2*atr14[-1]) if bull else (max(h[-5:]) + 1.2*atr14[-1])
+        sl = (min(l[-5:]) - self.atr_sl_mult*atr[-1]) if bull else (max(h[-5:]) + self.atr_sl_mult*atr[-1])
         R = abs(entry - sl); tp1 = entry + side*R; tp2 = entry + side*2*R
         entry = self._round(sym, entry); sl = self._round(sym, sl); tp1 = self._round(sym, tp1); tp2 = self._round(sym, tp2)
 
@@ -145,4 +167,7 @@ class SignalEngine:
 
     def status_snapshot(self, symbols: List[str], tz_name: str)->str:
         out = [f"Symbols: {symbols}", f"TZ: {tz_name}", f"Min level: {self.min_level}", f"Cooldown: {self.cooldown}"]
+        out += [f"EMA(1h): {self.ema_fast_1h}/{self.ema_slow_1h}, EMA200(15m): {self.ema_200_15m}",
+                f"MACD: {self.macd_fast},{self.macd_slow},{self.macd_signal} | RSI: {self.rsi_period}",
+                f"ATR: {self.atr_period} x {self.atr_sl_mult} | VolSMA: {self.vol_sma_period} x{self.vol_spike_mult}"]
         return "Status:\n" + "\n".join(out)

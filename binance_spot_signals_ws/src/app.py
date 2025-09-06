@@ -1,7 +1,8 @@
 import asyncio, logging, yaml
 from pydantic import BaseModel
 from zoneinfo import ZoneInfo
-from typing import List
+from typing import List, Optional
+
 from src.core.exchange import BinanceREST, BinanceWS
 from src.logic.engine import SignalEngine
 from src.telegram.notify import Telegram
@@ -17,6 +18,24 @@ class Config(BaseModel):
     rest_base: str = "https://api.binance.com"
     history_bars: int = 300
     log_level: str = "INFO"
+    # Telegram
+    tg_token: Optional[str] = None
+    tg_chat_id: Optional[str] = None
+    # Indicators
+    ema_fast_1h: int = 20
+    ema_slow_1h: int = 50
+    ema_200_15m: int = 200
+    macd_fast: int = 12
+    macd_slow: int = 26
+    macd_signal: int = 9
+    rsi_period: int = 14
+    atr_period: int = 14
+    atr_sl_mult: float = 1.2
+    vol_sma_period: int = 20
+    vol_spike_mult: float = 1.5
+    supertrend_enabled: bool = False
+    supertrend_period: int = 10
+    supertrend_multiplier: float = 3.0
 
 async def main(config_path: str):
     with open(config_path, "r") as f:
@@ -24,19 +43,42 @@ async def main(config_path: str):
 
     logging.basicConfig(level=getattr(logging, cfg.log_level.upper(), logging.INFO),
                         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+    log = logging.getLogger("app")
 
     tz = ZoneInfo(cfg.timezone)
     rest = BinanceREST(cfg.rest_base)
     tick_size = await rest.get_tick_size_map(cfg.symbols)
 
-    tg = Telegram.from_env()
+    # Telegram: prefer options; fall back to env for backward-compat
+    token = (cfg.tg_token or "").strip() or None
+    chat = (cfg.tg_chat_id or "").strip() or None
+    tg = Telegram(token=token, chat_id=chat).fallback_from_env()
+
     engine = SignalEngine(
-        tz=tz, vwap_reset_local=cfg.vwap_session_reset,
+        tz=tz,
+        vwap_reset_local=cfg.vwap_session_reset,
         cooldown_minutes=cfg.cooldown_minutes_per_symbol,
-        min_level=cfg.min_alert_level, tick_size=tick_size, telegram=tg
+        min_level=cfg.min_alert_level,
+        tick_size=tick_size,
+        telegram=tg,
+        # indicators
+        ema_fast_1h=cfg.ema_fast_1h,
+        ema_slow_1h=cfg.ema_slow_1h,
+        ema_200_15m=cfg.ema_200_15m,
+        macd_fast=cfg.macd_fast,
+        macd_slow=cfg.macd_slow,
+        macd_signal=cfg.macd_signal,
+        rsi_period=cfg.rsi_period,
+        atr_period=cfg.atr_period,
+        atr_sl_mult=cfg.atr_sl_mult,
+        vol_sma_period=cfg.vol_sma_period,
+        vol_spike_mult=cfg.vol_spike_mult,
+        supertrend_enabled=cfg.supertrend_enabled,
+        supertrend_period=cfg.supertrend_period,
+        supertrend_multiplier=cfg.supertrend_multiplier,
     )
 
-    # preload REST
+    # preload REST history
     for s in cfg.symbols:
         h1 = await rest.get_klines(s, "1h", cfg.history_bars)
         m15 = await rest.get_klines(s, "15m", cfg.history_bars)

@@ -9,13 +9,16 @@ class Telegram:
         self.chat_id = chat_id
         self.last_update_id = None
 
+    def fallback_from_env(self):
+        if not self.token:
+            self.token = os.getenv("TG_TOKEN")
+        if not self.chat_id:
+            self.chat_id = os.getenv("TG_CHAT_ID")
+        return self
+
     @property
     def available(self)->bool:
         return bool(self.token and self.chat_id)
-
-    @classmethod
-    def from_env(cls):
-        return cls(os.getenv("TG_TOKEN"), os.getenv("TG_CHAT_ID"))
 
     async def send(self, text: str):
         if not self.available:
