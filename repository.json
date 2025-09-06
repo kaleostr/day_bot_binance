@@ -1,10 +1,6 @@
 {
   "name": "Vyacheslav Home Assistant Add-ons",
-  "url": "https://github.com/your-username/ha-addons-repo",
+  "url": "https://github.com/kaleostr/day_bot_binance",
   "maintainer": "Vyacheslav",
-  "arch": [
-    "aarch64",
-    "armv7",
-    "amd64"
-  ]
+  "arch": ["aarch64","armv7","amd64"]
 }
