@@ -1,10 +1,16 @@
-# Binance Spot Signals (WebSocket) — HA Add-on
+# Vyacheslav — Home Assistant Add-ons
 
-Версия 1.7.1
+Этот репозиторий содержит аддоны для Home Assistant.
 
-LONG-only режим, таймзона KST.
-Агрегатор 3 из 5 с обязательными группами (тренд ∧ моментум ∧ ликвидность).
-Жёсткие блок-фильтры (RSI1h, +2σ VWAP без отката, верхняя тень/ATR, VWAP only кроме reclaim+объём).
-«Один сигнал на бар», кулдаун по умолчанию 10m.
-Риск-менеджмент: SL=ATR×1.3; TP 0.5/1.0/1.5R; трейлинг после TP1 — max(VWAP, ATR×0.8).
-Быстрые пресеты: conservative / balanced / active.
+## Подключение в Home Assistant
+1. Settings → Add-ons → **Add-on Store** → меню (⋮) → **Repositories** → добавьте URL этого репозитория GitHub.
+2. Найдите в списке **Binance Spot Signals (WebSocket)** → Install.
+3. Во вкладке **Configuration**:
+   - `preset`: balanced / conservative / active
+   - `long_only: true`
+   - `timezone: Asia/Seoul`, `vwap_session_reset: "00:00"`
+   - `cooldown_minutes_per_symbol: 10`
+   - Заполните `tg_token`, `tg_chat_id`.
+4. Нажмите **Save** → **Start**.
+
+> Опционально: добавьте CI/CD в `.github/workflows/build.yml`, чтобы собирать и публиковать Docker-образы в GHCR, и укажите в `config.yaml` строку `image:`.
