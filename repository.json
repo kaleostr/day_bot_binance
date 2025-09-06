@@ -1,0 +1,10 @@
+{
+  "name": "Vyacheslav Day Bot Add-ons",
+  "url": "https://github.com/kaleostr/day_bot_binance",
+  "maintainer": "Vyacheslav",
+  "arch": [
+    "aarch64",
+    "armv7",
+    "amd64"
+  ]
+}
