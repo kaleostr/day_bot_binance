@@ -12,10 +12,10 @@ WORKDIR /opt/app
 COPY requirements.txt /opt/requirements.txt
 RUN pip install --upgrade pip && pip install -r /opt/requirements.txt
 
-# Copy python package to /opt/app/src (correct layout)
+# Copy python package to /opt/app/src
 COPY src /opt/app/src
 
-# Proper entrypoint for HA add-on
+# Proper entrypoint
 COPY run.sh /run.sh
 RUN sed -i 's/\r$//' /run.sh && chmod +x /run.sh
 
