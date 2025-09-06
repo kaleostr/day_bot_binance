@@ -1,0 +1,10 @@
+{
+  "name": "Vyacheslav Home Assistant Add-ons",
+  "url": "https://github.com/your-username/ha-addons-repo",
+  "maintainer": "Vyacheslav",
+  "arch": [
+    "aarch64",
+    "armv7",
+    "amd64"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Binance Spot Signals (WebSocket)",
+  "version": "1.0.0",
+  "slug": "binance_spot_signals_ws",
+  "description": "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts.",
+  "arch": [
+    "aarch64",
+    "armv7",
+    "amd64"
+  ],
+  "startup": "services",
+  "boot": "auto",
+  "stage": "experimental",
+  "options": {},
+  "schema": {},
+  "webui": "http://[HOST]:[PORT:0]",
+  "init": false,
+  "ingress": false,
+  "host_network": false,
+  "map": [
+    "config:rw",
+    "ssl",
+    "share:rw"
+  ],
+  "tmpfs": true
+}
