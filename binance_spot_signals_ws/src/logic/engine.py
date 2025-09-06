@@ -24,12 +24,6 @@ class Series:
     def arrays(self):
         return (np.array(self.t), np.array(self.o), np.array(self.h), np.array(self.l), np.array(self.c), np.array(self.v))
 
-def local_level_breakout(high: np.ndarray, low: np.ndarray, lookback:int=10)->Tuple[float,float]:
-    if high.size < lookback+2: return (np.nan, np.nan)
-    res = np.max(high[-(lookback+2):-2])
-    sup = np.min(low[-(lookback+2):-2])
-    return (res, sup)
-
 class SignalEngine:
     def __init__(self, tz: ZoneInfo, vwap_reset_local: str, cooldown_minutes: int, min_count: int,
                  tick_size: Dict[str,float], telegram,
@@ -95,19 +89,16 @@ class SignalEngine:
             tp = (k["h"]+k["l"]+k["c"])/3; self.vwap[sym].update(tp, k["v"])
 
     def _is_same_kst_day(self, ts:int)->bool:
-        from datetime import datetime
         dt = datetime.fromtimestamp(ts, self.tz); now = datetime.now(self.tz)
         return dt.date() == now.date()
 
     def _is_session_reset(self, ts:int)->bool:
-        from datetime import datetime
         dt = datetime.fromtimestamp(ts, self.tz)
         return dt.hour==self.vwap_hour and dt.minute==self.vwap_minute
 
     def _round(self, sym:str, price:float)->float:
         step = self.tick.get(sym, 0.0001)
-        import math as _m
-        prec = max(0, -int(round(_m.log10(step)))) if step>0 else 4
+        prec = max(0, -int(round(math.log10(step)))) if step>0 else 4
         return round(round(price/step)*step, prec)
 
     def _reclaim(self, series_c: np.ndarray, baseline: np.ndarray, bars_below: int = 3) -> bool:
@@ -129,6 +120,7 @@ class SignalEngine:
     def evaluate(self, sym: str)->str|None:
         t,o,h,l,c,v = self.m5[sym].arrays()
         if len(c) < 60: return None
+
         last_ts = int(t[-1])
         if self.one_signal_per_bar and self.last_bar_sent.get(sym) == last_ts:
             return None

@@ -1,6 +1,6 @@
 
 name: "Binance Spot Signals (WebSocket)"
-version: "1.7.1"
+version: "1.7.3"
 slug: "binance_spot_signals_ws"
 description: "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts. Raspberry Pi 5 ready."
 arch:
@@ -15,6 +15,7 @@ map:
   - addon_config:rw
   - share:rw
 
+# Если используете GHCR, раскомментируйте и подставьте owner:
 # image: "ghcr.io/OWNER/{arch}-addon-binance_spot_signals_ws"
 
 options:
@@ -55,6 +56,7 @@ options:
   tg_token: ""
   tg_chat_id: ""
 
+  # ВАЖНО: теперь строка (в UI можно вставлять YAML-карту)
   symbol_overrides: ""
 
 schema:

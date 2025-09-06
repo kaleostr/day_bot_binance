@@ -1,8 +1,8 @@
 
-#!/usr/bin/with-contenv bashio
+#!/usr/bin/with-contenv bash
 set -euo pipefail
-bashio::log.info "Starting Binance Spot Signals add-on…"
+echo "[INFO] Starting Binance Spot Signals add-on…"
 CFG="/data/options.json"
 export PYTHONPATH=/opt/app
-bashio::log.info "Launching bot with /opt/venv/bin/python -m src.app"
+echo "[INFO] Launching bot with /opt/venv/bin/python -m src.app"
 exec /opt/venv/bin/python -m src.app --config "$CFG"
