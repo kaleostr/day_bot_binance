@@ -1,0 +1,38 @@
+name: "Binance Spot Signals (WebSocket)"
+version: "1.2.0"
+slug: "binance_spot_signals_ws"
+description: "Async Binance WebSocket signals bot (1h/15m/5m) with Telegram alerts. Raspberry Pi 5 ready."
+arch:
+  - aarch64
+  - armv7
+  - amd64
+stage: experimental
+startup: services
+init: false
+boot: auto
+map:
+  - addon_config:rw
+  - share:rw
+options:
+  symbols: ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"]
+  timezone: "Asia/Seoul"
+  vwap_session_reset: "00:00"
+  cooldown_minutes_per_symbol: 10
+  send_startup_message: true
+  min_alert_level: "conservative"
+  ws_url: "wss://stream.binance.com:9443"   # base; code adds /stream?streams=...
+  rest_base: "https://api.binance.com"
+  history_bars: 300
+  log_level: "INFO"
+schema:
+  symbols:
+    - str
+  timezone: str
+  vwap_session_reset: str
+  cooldown_minutes_per_symbol: int
+  send_startup_message: bool
+  min_alert_level: str
+  ws_url: str
+  rest_base: str
+  history_bars: int
+  log_level: str
