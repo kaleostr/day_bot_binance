@@ -1,10 +1,6 @@
 {
-  "name": "Vyacheslav HA Add-ons",
-  "url": "https://github.com/kaleostr/ha-binance-spot-addons",
+  "name": "Vyacheslav Day Bot Add-ons",
+  "url": "https://github.com/kaleostr/day_bot_binance",
   "maintainer": "Vyacheslav",
-  "arch": [
-    "aarch64",
-    "armv7",
-    "amd64"
-  ]
+  "arch": ["aarch64","armv7","amd64"]
 }
