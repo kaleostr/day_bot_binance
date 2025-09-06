@@ -1,5 +1,5 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
 if [ ! -f /data/config.yaml ]; then
   echo "config.yaml not found in /data. Creating a default one..."
@@ -24,9 +24,9 @@ fi
 
 if [ -f /data/.env ]; then
   set -a
-  source /data/.env
+  . /data/.env
   set +a
 fi
 
 export PYTHONPATH=/app
-python -m src.app --config /data/config.yaml
+exec python -m src.app --config /data/config.yaml
