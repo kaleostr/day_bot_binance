@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -29,4 +28,5 @@ if [ -f /data/.env ]; then
   set +a
 fi
 
+export PYTHONPATH=/app
 python -m src.app --config /data/config.yaml
