@@ -39,8 +39,8 @@
 3. В **/data** аддона создайте/отредактируйте:
    - `/data/.env` — токен и чат:
      ```env
-     TG_TOKEN=7929566269:AAGB5nz6hMwHPE5AKqY5orAyNeZXy_DzBkI
-     TG_CHAT_ID=311797898
+     TG_TOKEN=
+     TG_CHAT_ID=
      ```
    - `/data/config.yaml` — основные настройки (см. пример ниже).
 4. Перезапустите аддон.
