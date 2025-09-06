@@ -15,7 +15,7 @@ map:
   - share:rw
 
 # Включить GHCR: раскомментируйте и замените OWNER
-# image: "ghcr.io/OWNER/{arch}-addon-binance_spot_signals_ws"
+image: "ghcr.io/kaleostr/{arch}-addon-binance_spot_signals_ws"
 
 options:
   symbols: ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"]
