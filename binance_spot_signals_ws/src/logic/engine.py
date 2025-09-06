@@ -32,33 +32,47 @@ def local_level_breakout(high: np.ndarray, low: np.ndarray, lookback:int=10)->Tu
 class SignalEngine:
     def __init__(self, tz: ZoneInfo, vwap_reset_local: str, cooldown_minutes: int, min_count: int,
                  tick_size: Dict[str,float], telegram,
+                 long_only: bool=True, one_signal_per_bar: bool=True,
+                 rsi1h_block: int=50, upper_wick_atr_block: float=0.6,
                  ema_fast_1h: int=20, ema_slow_1h: int=50, ema_200_15m: int=200,
                  macd_fast: int=12, macd_slow: int=26, macd_signal: int=9,
                  rsi_period: int=14, rsi_zone_low: int=40, rsi_zone_mid: int=50, rsi_zone_high: int=60,
                  atr_period: int=14, atr_sl_mult: float=1.3,
-                 vol_sma_period: int=20, vol_spike_mult: float=1.5,
+                 vol_sma_period: int=20, volume_spike_mult: float=1.5,
                  supertrend_enabled: bool=False, supertrend_period: int=10, supertrend_multiplier: float=3.0,
-                 enable_short_signals: bool=True):
+                 tp_multipliers=(0.5,1.0,1.5), atr_trailing_mult: float=0.8, use_vwap_trailing: bool=True,
+                 symbol_overrides: dict | None = None):
         self.tz = tz
         self.vwap_hour, self.vwap_minute = map(int, vwap_reset_local.split(":"))
         self.cooldown = timedelta(minutes=cooldown_minutes)
         self.min_count = max(1, min(5, int(min_count)))
         self.tick = tick_size
         self.tg = telegram
+
         self.h1: Dict[str,Series] = {}
         self.m15: Dict[str,Series] = {}
         self.m5: Dict[str,Series] = {}
         self.vwap: Dict[str,VWAPSession] = {}
         self.last_sent: Dict[str, datetime] = {}
+        self.last_bar_sent: Dict[str, int] = {}
+
+        self.long_only = bool(long_only)
+        self.one_signal_per_bar = bool(one_signal_per_bar)
+        self.rsi1h_block = int(rsi1h_block)
+        self.upper_wick_atr_block = float(upper_wick_atr_block)
+
         self.ema_fast_1h = ema_fast_1h; self.ema_slow_1h = ema_slow_1h; self.ema_200_15m = ema_200_15m
         self.macd_fast = macd_fast; self.macd_slow = macd_slow; self.macd_signal = macd_signal
         self.rsi_period = rsi_period
         self.rsi_low = rsi_zone_low; self.rsi_mid = rsi_zone_mid; self.rsi_high = rsi_zone_high
         self.atr_period = atr_period; self.atr_sl_mult = atr_sl_mult
-        self.vol_sma_period = vol_sma_period; self.vol_spike_mult = vol_spike_mult
+        self.vol_sma_period = vol_sma_period; self.vol_spike_mult = volume_spike_mult
         self.supertrend_enabled = supertrend_enabled
         self.supertrend_period = supertrend_period; self.supertrend_multiplier = supertrend_multiplier
-        self.enable_short = enable_short_signals
+        self.tp_multipliers = tuple(tp_multipliers)
+        self.atr_trailing_mult = float(atr_trailing_mult)
+        self.use_vwap_trailing = bool(use_vwap_trailing)
+        self.symbol_overrides = symbol_overrides or {}
 
     def warmup(self, sym: str, h1: List[dict], m15: List[dict], m5: List[dict]):
         self.h1[sym] = Series(); self.m15[sym] = Series(); self.m5[sym] = Series()
@@ -92,117 +106,141 @@ class SignalEngine:
         prec = max(0, -int(round(math.log10(step))))
         return round(round(price/step)*step, prec)
 
-    # Conditions
-    def _trend_long(self, sym:str, price:float)->bool:
-        ema20_h1 = ema(self.h1[sym].arrays()[4], self.ema_fast_1h)
-        ema50_h1 = ema(self.h1[sym].arrays()[4], self.ema_slow_1h)
-        ema200_15 = ema(self.m15[sym].arrays()[4], self.ema_200_15m)
-        return bool(ema20_h1[-1] > ema50_h1[-1] and price > ema200_15[-1])
+    # ---- helpers ----
+    def _reclaim(self, series_c: np.ndarray, baseline: np.ndarray, bars_below: int = 3) -> bool:
+        if series_c.size < bars_below + 2: return False
+        below = np.less(series_c[-(bars_below+1):-1], baseline[-(bars_below+1):-1]).all()
+        return bool(below and (series_c[-1] > baseline[-1]))
 
-    def _trend_short(self, sym:str, price:float)->bool:
-        ema20_h1 = ema(self.h1[sym].arrays()[4], self.ema_fast_1h)
-        ema50_h1 = ema(self.h1[sym].arrays()[4], self.ema_slow_1h)
-        ema200_15 = ema(self.m15[sym].arrays()[4], self.ema_200_15m)
-        return bool(ema20_h1[-1] < ema50_h1[-1] and price < ema200_15[-1])
+    def _volume_spike(self, v: np.ndarray, period: int, mult: float) -> bool:
+        N = min(period, v.size)
+        if N < 2: return False
+        sma = np.nanmean(v[-N:])
+        return bool(v[-1] > mult * sma)
 
-    def _loc_long(self, sym:str, price:float)->bool:
-        vwap_val = self.vwap[sym].vwap(); s1p, s2p, s1n, s2n = self.vwap[sym].sigma()
-        if np.isnan(vwap_val): return False
-        return bool(price >= (s1n if not np.isnan(s1n) else vwap_val))
+    def _upper_wick_over_atr(self, o,h,l,c, atr: np.ndarray, thr: float) -> bool:
+        if not np.isfinite(atr[-1]) or atr[-1] <= 0: return False
+        upper_wick = float(h[-1] - max(o[-1], c[-1]))
+        return bool((upper_wick / atr[-1]) > thr)
 
-    def _loc_short(self, sym:str, price:float)->bool:
-        vwap_val = self.vwap[sym].vwap(); s1p, s2p, s1n, s2n = self.vwap[sym].sigma()
-        if np.isnan(vwap_val): return False
-        return bool(price <= (s1p if not np.isnan(s1p) else vwap_val))
-
-    def _mom_long(self, c)->bool:
-        _,_,h = macd(c, 12,26,9); r = rsi(c, self.rsi_period)
-        return bool(((h[-2] < 0 <= h[-1]) or (h[-1] > h[-2] and h[-1] >= 0)) and (r[-1] >= self.rsi_mid) and (np.nanmin(r[-3:]) >= self.rsi_low))
-
-    def _mom_short(self, c)->bool:
-        _,_,h = macd(c, 12,26,9); r = rsi(c, self.rsi_period)
-        return bool(((h[-2] > 0 >= h[-1]) or (h[-1] < h[-2] and h[-1] <= 0)) and ((r[-1] <= self.rsi_mid) or ((r[-2] >= self.rsi_high) and (r[-1] <= self.rsi_mid))))
-
-    def _trig_long(self, o,h,l,c,v)->bool:
-        o1,h1,l1,c1 = o[-2],h[-2],l[-2],c[-2]; o2,h2,l2,c2 = o[-1],h[-1],l[-1],c[-1]
-        trig = (c1<o1 and c2>o2 and o2<=c1 and c2>=o1) or ((h2-max(c2,o2))<=0.25*(h2-l2) and (min(c2,o2)-l2)>=0.6*(h2-l2)) or (abs(c2-o2)/(h2-l2)>=0.75 and c2>o2)
-        N = self.vol_sma_period if len(v)>=self.vol_sma_period else len(v)
-        sma = np.nanmean(v[-N:]) if N>0 else np.nanmean(v)
-        return bool(trig and (v[-1] > self.vol_spike_mult * sma))
-
-    def _trig_short(self, o,h,l,c,v)->bool:
-        o1,h1,l1,c1 = o[-2],h[-2],l[-2],c[-2]; o2,h2,l2,c2 = o[-1],h[-1],l[-1],c[-1]
-        trig = (c1>o1 and c2<o2 and o2>=c1 and c2<=o1) or ((min(c2,o2)-l2)<=0.25*(h2-l2) and (h2-max(c2,o2))>=0.6*(h2-l2)) or (abs(c2-o2)/(h2-l2)>=0.75 and c2<o2)
-        N = self.vol_sma_period if len(v)>=self.vol_sma_period else len(v)
-        sma = np.nanmean(v[-N:]) if N>0 else np.nanmean(v)
-        return bool(trig and (v[-1] > self.vol_spike_mult * sma))
-
-    def _struct_long(self, h,l,c)->bool:
-        res, sup = local_level_breakout(h,l,10)
-        if np.isnan(res): return False
-        return bool(c[-2] > res and l[-1] <= res*1.001 and c[-1] > max(h[-2], c[-2]))
-
-    def _struct_short(self, h,l,c)->bool:
-        res, sup = local_level_breakout(h,l,10)
-        if np.isnan(sup): return False
-        return bool(c[-2] < sup and h[-1] >= sup*0.999 and c[-1] < min(l[-2], c[-2]))
-
+    # ---- evaluate LONG-only ----
     def evaluate(self, sym: str)->str|None:
         t,o,h,l,c,v = self.m5[sym].arrays()
         if len(c) < 60: return None
-        price = c[-1]
-        long_conds = [
-            self._trend_long(sym, price),
-            self._loc_long(sym, price),
-            self._mom_long(c),
-            self._trig_long(o,h,l,c,v),
-            self._struct_long(h,l,c)
+
+        # один сигнал на бар
+        last_ts = int(t[-1])
+        if self.one_signal_per_bar and self.last_bar_sent.get(sym) == last_ts:
+            return None
+
+        # пер-символьные оверрайды
+        ov = self.symbol_overrides.get(sym, {})
+        confirmations_min = int(ov.get("confirmations_min", self.min_count))
+        volume_mult = float(ov.get("volume_spike_mult", self.vol_spike_mult))
+        atr_sl_mult = float(ov.get("atr_sl_mult", self.atr_sl_mult))
+        require_macd_and_rsi = bool(ov.get("require_macd_and_rsi", False))
+
+        # индикаторы
+        c1h = self.h1[sym].arrays()[4]
+        c15 = self.m15[sym].arrays()[4]
+        ema20_h1 = ema(c1h, self.ema_fast_1h); ema50_h1 = ema(c1h, self.ema_slow_1h)
+        ema200_15 = ema(c15, self.ema_200_15m)
+        macd_line, macd_sig, macd_hist = macd(c, self.macd_fast, self.macd_slow, self.macd_signal)
+        rsi5 = rsi(c, self.rsi_period); rsi15 = rsi(c15, self.rsi_period); rsi1h = rsi(c1h, self.rsi_period)
+        atr = atr_rma(h,l,c, self.atr_period)
+
+        # VWAP session
+        vwap_val = self.vwap[sym].vwap()
+        s1p, s2p, s1n, s2n = self.vwap[sym].sigma()
+
+        # ---- блок-фильтры ----
+        if np.isfinite(rsi1h[-1]) and rsi1h[-1] < self.rsi1h_block:
+            return None
+        if np.isfinite(vwap_val) and np.isfinite(s2p) and c[-1] > s2p:
+            touched = any((l[-i] <= s1p) or (l[-i] <= vwap_val) for i in range(1, min(6, len(c))))
+            if not touched: return None
+        if self._upper_wick_over_atr(o,h,l,c, atr, self.upper_wick_atr_block):
+            return None
+
+        above_vwap_now = (np.isfinite(vwap_val) and c[-1] >= vwap_val)
+        vwap_reclaim = False
+        if np.isfinite(vwap_val) and len(c) >= 5:
+            below_cnt = int(np.less(c[-5:-1], vwap_val).sum())
+            vwap_reclaim = (below_cnt >= 3 and c[-1] > vwap_val and self._volume_spike(v, self.vol_sma_period, volume_mult))
+        if not (above_vwap_now or vwap_reclaim):
+            return None
+
+        # ---- группы условий ----
+        cond_bias_ema_1h = bool(ema20_h1[-1] > ema50_h1[-1])
+        cond_ema200_15m_above = bool(c[-1] > ema200_15[-1])
+        cond_ema200_15m_reclaim = self._reclaim(c, ema200_15, bars_below=3)
+        cond_trend = cond_bias_ema_1h or cond_ema200_15m_above or cond_ema200_15m_reclaim
+
+        cond_macd_up = bool((macd_hist[-2] <= 0 < macd_hist[-1]) or (macd_hist[-1] > macd_hist[-2] and macd_hist[-2] > macd_hist[-3]))
+        cond_macd_up = cond_macd_up and (macd_line[-1] > macd_sig[-1])
+        cond_rsi_reclaim50 = bool(rsi5[-1] >= 50 or (rsi5[-3] <= 40 and rsi5[-2] > rsi5[-3] and rsi5[-1] > 50))
+        cond_rsi_reclaim50 = cond_rsi_reclaim50 and (rsi15[-1] >= 50)
+        cond_momentum = (cond_macd_up and cond_rsi_reclaim50) if require_macd_and_rsi else (cond_macd_up or cond_rsi_reclaim50)
+
+        cond_vwap_above = bool(above_vwap_now or vwap_reclaim)
+        cond_volume_spike = self._volume_spike(v, self.vol_sma_period, volume_mult)
+        cond_liquidity = cond_vwap_above or cond_volume_spike
+
+        candidates = [
+            cond_bias_ema_1h,
+            (cond_ema200_15m_above or cond_ema200_15m_reclaim),
+            cond_macd_up,
+            cond_rsi_reclaim50,
+            cond_vwap_above,
+            cond_volume_spike
         ]
-        if self.enable_short:
-            short_conds = [
-                self._trend_short(sym, price),
-                self._loc_short(sym, price),
-                self._mom_short(c),
-                self._trig_short(o,h,l,c,v),
-                self._struct_short(h,l,c)
-            ]
-        else:
-            short_conds = [False]*5
-        lc = sum(long_conds); sc = sum(short_conds)
-        direction = None; conds=None
-        if self.enable_short and lc >= self.min_count and sc >= self.min_count:
+        selected = candidates[:5]
+        ok_cnt = sum(bool(x) for x in selected)
+        groups_ok = (cond_trend and cond_momentum and cond_liquidity)
+        if not (groups_ok and ok_cnt >= confirmations_min):
             return None
-        if lc >= self.min_count:
-            direction = "LONG"; conds = long_conds
-        elif self.enable_short and sc >= self.min_count:
-            direction = "SHORT"; conds = short_conds
-        else:
-            return None
-        key = f"{sym}:{direction}"; now = datetime.now(timezone.utc)
+
+        entry = max(h[-1], c[-1]) * 1.0001
+        R = atr[-1] * atr_sl_mult
+        sl = entry - R
+        tp1 = entry + 0.5 * R
+        tp2 = entry + 1.0 * R
+        tp3 = entry + 1.5 * R
+
+        trail_atr = c[-1] - 0.8 * atr[-1]
+        trail_vwap = vwap_val if np.isfinite(vwap_val) else trail_atr
+        trail = max(trail_atr, trail_vwap)
+
+        entry = self._round(sym, entry); sl = self._round(sym, sl)
+        tp1 = self._round(sym, tp1); tp2 = self._round(sym, tp2); tp3 = self._round(sym, tp3)
+        trail = self._round(sym, trail)
+
+        reasons = []
+        if cond_bias_ema_1h: reasons.append("Bias1h EMA20>50")
+        if cond_ema200_15m_above: reasons.append("Цена>EMA200(15m)")
+        if cond_ema200_15m_reclaim: reasons.append("EMA200(15m) reclaim")
+        if cond_macd_up: reasons.append("MACD↑")
+        if cond_rsi_reclaim50: reasons.append("RSI5m>50 (+15m≥50)")
+        if cond_vwap_above: reasons.append("VWAP↑/reclaim")
+        if cond_volume_spike: reasons.append(f"Объём>SMA×{volume_mult:g}")
+
+        msg = (f"🟢 {confirmations_min}/5 | {sym} 5m — LONG\n"
+               f"Вход: {entry}\nSL: {sl}\nTP1: {tp1} | TP2: {tp2} | TP3: {tp3}\n"
+               f"Trail: ближний к цене → {trail}\n"
+               f"Причины: {', '.join(reasons)}")
+
+        now = datetime.now(timezone.utc)
+        key = f"{sym}:LONG"
         last = self.last_sent.get(key)
         if last and (now - last) < self.cooldown:
             return None
-        atr = atr_rma(h,l,c,self.atr_period)
-        if direction == "LONG":
-            entry = h[-1]*1.0001; sl = min(l[-5:]) - self.atr_sl_mult*atr[-1]; side=1
-        else:
-            entry = l[-1]*0.9999; sl = max(h[-5:]) + self.atr_sl_mult*atr[-1]; side=-1
-        R = abs(entry-sl); tp1 = entry + side*R; tp2 = entry + side*2*R
-        entry=self._round(sym,entry); sl=self._round(sym,sl); tp1=self._round(sym,tp1); tp2=self._round(sym,tp2)
-        reasons_map = ["Trend","VWAP/σ Location","MACD+RSI","Trigger+Volume","Structure"]
-        reasons = [reasons_map[i] for i,ok in enumerate(conds) if ok]
-        emoji = "🟠" if self.min_count<=2 else ("🟡" if self.min_count==3 else "🟢")
-        msg = (f"{emoji} {self.min_count}/5 | {sym} 5m — {direction}\n"
-               f"Вход: {entry}\nSL: {sl}\nTP1: {tp1} | TP2: {tp2}\n"
-               f"Причины: {', '.join(reasons)}")
-        self.last_sent[key]=now
+        self.last_sent[key] = now
+        self.last_bar_sent[sym] = last_ts
         return msg
 
     def status_snapshot(self, symbols: List[str], tz_name: str)->str:
-        mode = "LONG+SHORT" if self.enable_short else "LONG only"
-        out = [f"Symbols: {symbols}", f"TZ: {tz_name}", f"Directions: {mode}", f"Min confirmations: {self.min_count}/5",
-               f"RSI zones: {self.rsi_low}/{self.rsi_mid}/{self.rsi_high}", f"Cooldown: {self.cooldown}",
-               f"EMA(1h): {self.ema_fast_1h}/{self.ema_slow_1h}, EMA200(15m): {self.ema_200_15m}",
-               f"MACD: {self.macd_fast},{self.macd_slow},{self.macd_signal} | RSI: {self.rsi_period}",
-               f"ATR: {self.atr_period} x {self.atr_sl_mult} | VolSMA: {self.vol_sma_period} x{self.vol_spike_mult}"]
+        out = [f"Symbols: {symbols}", f"TZ: {tz_name}", f"Mode: LONG-only",
+               f"Min confirmations: {self.min_count}/5",
+               f"RSI1h block: < {self.rsi1h_block}",
+               f"Cooldown: {self.cooldown}"]
         return "Status:\n" + "\n".join(out)
