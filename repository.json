@@ -1,0 +1,8 @@
+{
+  "name": "Binance Spot Signal Bot (GitHub)",
+  "maintainer": "Вячеслав",
+  "url": "https://github.com/your/repo",
+  "addons": [
+    "binance_signal_bot"
+  ]
+}
