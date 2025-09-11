@@ -3,7 +3,7 @@ from typing import Dict, Any, List
 import yaml
 import pandas as pd
 from fastapi import FastAPI
-from kucoin_client import KucoinClient
+from Binance_client import BinanceClient
 from features import ohlcv_df, add_indicators
 from rules import should_signal
 from notifier import TelegramNotifier
@@ -59,7 +59,7 @@ def load_cfg() -> Dict[str, Any]:
         cfg = yaml.safe_load(f)
     # allowed keys for syncing to options.json (based on config.json schema)
     try:
-        with open('/data/../../kucoin_signal_bot/config.json','r',encoding='utf-8') as cf:
+        with open('/data/../../Binance_signal_bot/config.json','r',encoding='utf-8') as cf:
             cjj = json.load(cf)
             schema_keys = list((cjj or {}).get('schema', {}).keys())
             cfg['allowed_keys'] = schema_keys
@@ -155,7 +155,7 @@ def format_signal(sym: str, res: Dict[str, Any], confirms: int, adjusted_tps):
             f"TP1:  {adjusted_tps[0]:.6f}\nTP2:  {adjusted_tps[1]:.6f}\nTP3:  {adjusted_tps[2]:.6f}\n"
             f"Причины: {reasons}")
 
-async def build_symbol_universe(ku: KucoinClient, quote: str, top_n: int, min_vol24: float):
+async def build_symbol_universe(ku: BinanceClient, quote: str, top_n: int, min_vol24: float):
     data = await ku.fetch_all_tickers()
     arr = data.get("data", {}).get("ticker", [])
     rows = []
@@ -172,13 +172,13 @@ async def build_symbol_universe(ku: KucoinClient, quote: str, top_n: int, min_vo
     rows = [s for s,v in rows if v >= min_vol24][:top_n]
     return rows
 
-async def fetch_df(ku: KucoinClient, symbol: str, tf: str, opts: Dict[str, Any]):
+async def fetch_df(ku: BinanceClient, symbol: str, tf: str, opts: Dict[str, Any]):
     kl = await ku.fetch_candles(symbol, tf=tf, limit=300)
     df = ohlcv_df(kl)
     df = add_indicators(df, opts)
     return df
 
-async def scan_once(tg: TelegramNotifier, ku: KucoinClient, cfg: Dict[str, Any], opts: Dict[str, Any]):
+async def scan_once(tg: TelegramNotifier, ku: BinanceClient, cfg: Dict[str, Any], opts: Dict[str, Any]):
     quote = opts.get("symbols_quote","USDT")
     topn = int(opts.get("top_n_by_volume", 120))
     min_vol24 = float(opts.get("min_vol_24h_usd", 5000000))
@@ -235,9 +235,9 @@ async def worker_loop():
     STATE["runtime"]["min_confirms"] = load_runtime_min_confirms(def_val)
 
     tg = TelegramNotifier(opts.get("telegram_token",""), opts.get("telegram_chat_id",""))
-    ku = KucoinClient()
+    ku = BinanceClient()
 
-    await tg.send("✅ KuCoin Spot Signal Bot запущен")
+    await tg.send("✅ Binance Spot Signal Bot запущен")
 
     while True:
         try:
@@ -348,7 +348,22 @@ async def api_set_min(val: int):
 async def on_startup():
     asyncio.create_task(worker_loop())
     asyncio.create_task(commands_loop())
+    # Send startup notice with dynamic add-on name and version
+    try:
+        opts = get_addon_options()
+        tg = TelegramNotifier(opts.get("telegram_token",""), opts.get("telegram_chat_id",""))
+        # Read version and name from config.json next to this app
+        import json as _json
+        from pathlib import Path as _Path
+        _cfg = _json.load(open(str(_Path(__file__).resolve().parents[1] / "config.json"), "r", encoding="utf-8"))
+        _name = _cfg.get("name","Binance Spot Signal Bot")
+        _ver  = _cfg.get("version","")
+        if tg:
+            await tg.send(f"✅ {_name} запущен{f' (v{_ver})' if _ver else ""}")
+    except Exception:
+        pass
 
 @app.get("/health")
+
 def health():
     return {"ok": True, "signals_sent": STATE["signals_sent"], "tracked_symbols": len(STATE.get("symbols", [])), "min_confirms": STATE["runtime"]["min_confirms"]}
